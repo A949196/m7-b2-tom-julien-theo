@@ -2,33 +2,52 @@
 
 ```mermaid
 flowchart LR
-    CR[(Compte-rendu médical)] --> EXT[LLM extracteur\nSchéma JSON imposé]
-    EXT --> VAL{Validation\nformat + valeurs + preuve textuelle}
-    VAL -->|valide| VAR[Variables textuelles\nstructurées]
-    VAL -->|invalide ou incertain| REV[File de relecture\nhumaine habilitée]
-    REV -->|valide| VAR
-    REV -->|non confirmé| NULL[Champ null / inconnu]
+    classDef process fill:#e8f0fe,stroke:#4285f4,color:#1a1a1a
+    classDef data fill:#fef7e0,stroke:#f9ab00,color:#1a1a1a
+    classDef decision fill:#fce8e6,stroke:#ea4335,color:#1a1a1a
+    classDef fallback fill:#fde9e9,stroke:#ea4335,stroke-dasharray: 4 3,color:#1a1a1a
+    classDef monitor fill:#e6f4ea,stroke:#34a853,color:#1a1a1a
 
-    ADM[(Variables administratives)] --> FEAT[Jeu de variables\nadmin + extraites]
+    CR[(Compte-rendu médical)]:::data --> EXT[LLM extracteur<br/>Schéma JSON imposé]:::process
+    EXT --> VAL{Validation<br/>format + valeurs + preuve textuelle}:::decision
+    VAL -->|valide| VAR[Variables textuelles<br/>structurées]:::data
+    VAL -. invalide ou incertain .-> REV[File de relecture<br/>humaine habilitée]:::fallback
+    REV -. validé .-> VAR
+    REV -. non confirmé .-> NULL[Champ null / inconnu]:::data
+
+    ADM[(Variables administratives<br/>conservées)]:::data --> FEAT[Jeu de variables<br/>existantes + extraites]:::process
     VAR --> FEAT
     NULL --> FEAT
-    FEAT --> ML[Modèle ML\nclassification séjour prolongé]
-    ML --> SCORE[Score de risque\n+ explication]
-    SCORE --> DEC{Seuil de confiance}
-    DEC -->|confiant| OUT[Décision tracée]
-    DEC -->|incertain| HITL[Revue humaine\navec pouvoir de contredire]
+    FEAT --> ML[Modèle ML<br/>classification séjour prolongé]:::process
+    ML --> SCORE[Score de risque<br/>+ explication]:::process
+    SCORE --> DEC{Seuil de confiance}:::decision
+    DEC -->|confiant| OUT[Décision tracée]:::process
+    DEC -. incertain .-> HITL[Revue humaine<br/>avec pouvoir de contredire]:::fallback
 
-    classDef data fill:#E8F1F5,stroke:#2C5364,color:#172A33
-    classDef process fill:#EAF4E2,stroke:#527A43,color:#1F2D1A
-    classDef control fill:#FFF2CC,stroke:#9A7617,color:#3D3008
-    classDef human fill:#FCE4EC,stroke:#9B4562,color:#401421
-    classDef output fill:#EDE7F6,stroke:#65518A,color:#291C42
+    AUDIT[(Logs et traçabilité<br/>source, version, score, décision)]:::data
+    REV -. trace .-> AUDIT
+    OUT -. trace .-> AUDIT
+    HITL -. trace .-> AUDIT
 
-    class CR,ADM,VAR,NULL data
-    class EXT,VAL,FEAT,ML process
-    class DEC control
-    class REV,HITL human
-    class SCORE,OUT output
+    EXT -. mesure .-> MON[Qualité extraction<br/>taux de null et relecture]:::monitor
+    ML -. mesure .-> MON
+
+    subgraph CICD["Industrialisation — CI/CD"]
+        direction LR
+        HIST[(Historique annoté<br/>avec nouvelles variables)]:::data --> TRAIN[Réentraînement<br/>et validation comparative]:::process
+        TRAIN --> REG[(Registre de modèles<br/>versions horodatées)]:::data
+        REG -. déploie .-> ML
+    end
+
+    subgraph OBS["Observabilité continue"]
+        direction LR
+        ML -. mesure .-> FAIR[Suivi d'équité<br/>écart de performance]:::monitor
+        ML -. mesure .-> DRIFT[Suivi de dérive<br/>features, calibration]:::monitor
+        FAIR -. seuil dépassé .-> ALERT[Alerte + réentraînement]:::fallback
+        DRIFT -. seuil dépassé .-> ALERT
+    end
+
+    INFRA[Déploiement redondant<br/>≥ 2 instances + sauvegarde]:::process -. remplace le SPOF .-> ML
 ```
 
 **Principe** : le LLM n'effectue pas la prédiction. Il extrait, à partir des
